@@ -1,0 +1,13 @@
+{
+    "name": "telegram-user-bot",
+    "version": "1.0.0",
+    "description": "Telegram User Bot with Vue 3 frontend and Node.js backend",
+    "scripts": {
+      "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install",
+      "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
+      "start": "npm run install:all && npm run dev"
+    },
+    "devDependencies": {
+      "concurrently": "^8.2.2"
+    }
+  }
