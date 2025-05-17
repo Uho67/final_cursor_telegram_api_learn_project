@@ -121,7 +121,9 @@ class TelegramService {
       .replace('{firstName}', user.firstName || '')
       .replace('{lastName}', user.lastName || '')
       .replace('{username}', user.username ? '@' + user.username : '')
-      .replace('{id}', user.id.toString());
+      .replace('{id}', user.id.toString())
+      .trim()
+      .replace(/\s+/g, ' ');
   }
 
   async setWelcomeMessage(message) {
@@ -222,74 +224,6 @@ class TelegramService {
     } catch (error) {
       logger.error('Error getting pending join requests:', error);
       throw new Error(`Failed to get pending join requests: ${error.message}`);
-    }
-  }
-
-  async approveAllPendingRequests(chatId) {
-    try {
-      await this.ensureInitialized();
-      
-      const inputChannel = await this.client.getInputEntity(chatId);
-      
-      // Get all pending join requests
-      const pendingRequests = await this.client.invoke(
-        new Api.channels.GetParticipants({
-          channel: inputChannel,
-          filter: new Api.ChannelParticipantsRecent(),
-          offset: 0,
-          limit: 100
-        })
-      );
-
-      const results = {
-        total: pendingRequests.users.length,
-        approved: 0,
-        failed: 0,
-        errors: []
-      };
-
-      // Process each pending request
-      for (const user of pendingRequests.users) {
-        try {
-          const inputUser = new Api.InputUser({
-            userId: BigInt(user.id),
-            accessHash: BigInt(user.accessHash)
-          });
-
-          await this.client.invoke(
-            new Api.messages.HideChatJoinRequest({
-              peer: inputChannel,
-              approved: true,
-              userId: inputUser
-            })
-          );
-          
-          results.approved++;
-          logger.info(`Successfully approved join request for user: ${user.username || user.id}`);
-        } catch (error) {
-          results.failed++;
-          results.errors.push({
-            userId: user.id,
-            error: error.message
-          });
-          
-          // Log specific error cases
-          if (error.message.includes('USER_ID_INVALID')) {
-            logger.warn(`Could not approve user ${user.id} - Invalid user ID or access hash`);
-          } else if (error.message.includes('CHAT_ADMIN_REQUIRED')) {
-            logger.warn(`Could not approve user ${user.id} - Admin rights required`);
-          } else if (error.message.includes('USER_PRIVACY_RESTRICTED')) {
-            logger.warn(`Could not approve user ${user.id} - User's privacy settings prevent this action`);
-          } else {
-            logger.error(`Unexpected error approving user ${user.id}:`, error);
-          }
-        }
-      }
-
-      return results;
-    } catch (error) {
-      logger.error('Error in approveAllPendingRequests:', error);
-      throw new Error(`Failed to approve all pending requests: ${error.message}`);
     }
   }
 
