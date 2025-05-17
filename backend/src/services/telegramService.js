@@ -1,7 +1,8 @@
 const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
-const { Api } = require('telegram/tl');
+const { Api } = require('telegram/tl'); // low-level
+const { Raw } = require('telegram/tl/custom');
 const logger = require('../utils/logger');
 
 class TelegramService {
@@ -13,6 +14,7 @@ class TelegramService {
     this.isInitialized = false;
     this.autoApproveEnabled = true; // Flag to control auto-approve feature
     this.currentUser = null;
+    this.welcomeMessage = "Welcome {firstName}! Your join request has been automatically approved."; // Default welcome message
   }
 
   async ensureInitialized() {
@@ -80,44 +82,59 @@ class TelegramService {
   async setupEventHandlers() {
     if (!this.client) return;
     
-      // Get current user info once during setup
-      this.currentUser = await this.client.getMe();
-      // Handle all updates
-      this.client.addEventHandler(async (update) => {
+    // Handle all updates
+    this.client.addEventHandler(async (update) => {
         try {
-          if (update.className === "UpdatePendingJoinRequests") {
-         
-            const inputChannel = await this.client.getInputEntity(update.peer);
-              // 2. Идём по каждому пользователю из recentRequesters
-              for (const requester of update.recentRequesters) {
-                const userIdStr = requester.value.toString();
-                const userEntity = update._entities.get(userIdStr);
-              
-                if (!userEntity) {
-                  console.warn("No entity for user ID:", userIdStr);
-                  continue;
+            // Check if it's a new join request update
+            if (update instanceof Api.UpdatePendingJoinRequests) {
+                logger.info('New join request update received');
+                
+                // Get the chat ID
+                const chatId = update.peer.channelId.toString();
+                logger.info(`New join request received for chat: ${chatId}`);
+
+                // Get the input channel entity
+                const inputChannel = await this.client.getInputEntity(update.peer);
+
+                try {
+                    // Approve all pending join requests at once
+                    await this.client.invoke(
+                        new Api.messages.HideAllChatJoinRequests({
+                            peer: inputChannel,
+                            approved: true
+                        })
+                    );
+                    
+                    logger.info(`Successfully approved all pending join requests for chat: ${chatId}`);
+                } catch (error) {
+                    logger.error(`Failed to approve all pending join requests for chat ${chatId}:`, error);
                 }
-              
-                const inputUser = new Api.InputUser({
-                  userId: BigInt(userEntity.id),
-                  accessHash: BigInt(userEntity.accessHash.value),
-                });
-              
-                // 3. Одобряем запрос
-                await this.client.invoke(
-                  new Api.messages.HideChatJoinRequest({
-                    peer: inputChannel,
-                    approved: true,
-                    userId: inputUser
-                  })
-                );
-                console.log(`Approved: ${userEntity.username || userEntity.id}`);
-              }
-          }
+            }
         } catch (error) {
-          logger.error(error.message);
+            logger.error('Error processing update:', error);
         }
-      });
+    });
+  }
+
+  formatWelcomeMessage(template, user) {
+    return template
+      .replace('{firstName}', user.firstName || '')
+      .replace('{lastName}', user.lastName || '')
+      .replace('{username}', user.username ? '@' + user.username : '')
+      .replace('{id}', user.id.toString());
+  }
+
+  async setWelcomeMessage(message) {
+    if (!message || typeof message !== 'string') {
+      throw new Error('Welcome message must be a non-empty string');
+    }
+    this.welcomeMessage = message;
+    logger.log('INFO', 'Welcome message updated:', message);
+    return this.welcomeMessage;
+  }
+
+  async getWelcomeMessage() {
+    return this.welcomeMessage;
   }
 
   // Add methods to control auto-approve feature
@@ -176,6 +193,103 @@ class TelegramService {
     } catch (error) {
       logger.error('Error getting chat details:', error);
       throw new Error(`Failed to get chat details: ${error.message}`);
+    }
+  }
+
+  async getPendingJoinRequests(chatId) {
+    try {
+      await this.ensureInitialized();
+      
+      const inputChannel = await this.client.getInputEntity(chatId);
+      
+      // Get all pending join requests
+      const pendingRequests = await this.client.invoke(
+        new Api.channels.GetParticipants({
+          channel: inputChannel,
+          filter: new Api.ChannelParticipantsRecent(),
+          offset: 0,
+          limit: 100
+        })
+      );
+
+      return pendingRequests.users.map(user => ({
+        id: user.id.toString(),
+        username: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        accessHash: user.accessHash.toString()
+      }));
+    } catch (error) {
+      logger.error('Error getting pending join requests:', error);
+      throw new Error(`Failed to get pending join requests: ${error.message}`);
+    }
+  }
+
+  async approveAllPendingRequests(chatId) {
+    try {
+      await this.ensureInitialized();
+      
+      const inputChannel = await this.client.getInputEntity(chatId);
+      
+      // Get all pending join requests
+      const pendingRequests = await this.client.invoke(
+        new Api.channels.GetParticipants({
+          channel: inputChannel,
+          filter: new Api.ChannelParticipantsRecent(),
+          offset: 0,
+          limit: 100
+        })
+      );
+
+      const results = {
+        total: pendingRequests.users.length,
+        approved: 0,
+        failed: 0,
+        errors: []
+      };
+
+      // Process each pending request
+      for (const user of pendingRequests.users) {
+        try {
+          const inputUser = new Api.InputUser({
+            userId: BigInt(user.id),
+            accessHash: BigInt(user.accessHash)
+          });
+
+          await this.client.invoke(
+            new Api.messages.HideChatJoinRequest({
+              peer: inputChannel,
+              approved: true,
+              userId: inputUser
+            })
+          );
+          
+          results.approved++;
+          logger.info(`Successfully approved join request for user: ${user.username || user.id}`);
+        } catch (error) {
+          results.failed++;
+          results.errors.push({
+            userId: user.id,
+            error: error.message
+          });
+          
+          // Log specific error cases
+          if (error.message.includes('USER_ID_INVALID')) {
+            logger.warn(`Could not approve user ${user.id} - Invalid user ID or access hash`);
+          } else if (error.message.includes('CHAT_ADMIN_REQUIRED')) {
+            logger.warn(`Could not approve user ${user.id} - Admin rights required`);
+          } else if (error.message.includes('USER_PRIVACY_RESTRICTED')) {
+            logger.warn(`Could not approve user ${user.id} - User's privacy settings prevent this action`);
+          } else {
+            logger.error(`Unexpected error approving user ${user.id}:`, error);
+          }
+        }
+      }
+
+      return results;
+    } catch (error) {
+      logger.error('Error in approveAllPendingRequests:', error);
+      throw new Error(`Failed to approve all pending requests: ${error.message}`);
     }
   }
 

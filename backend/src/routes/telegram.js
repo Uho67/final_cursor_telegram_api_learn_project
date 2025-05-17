@@ -149,4 +149,87 @@ router.get('/auto-approve/status', async (req, res) => {
   }
 });
 
+// Get all pending join requests for a chat
+router.get('/chats/:chatId/pending-requests', async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const pendingRequests = await telegramService.getPendingJoinRequests(chatId);
+    
+    res.json({
+      success: true,
+      data: {
+        total: pendingRequests.length,
+        requests: pendingRequests
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching pending join requests:', error);
+    
+    if (error.message.includes('not initialized')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Telegram client not initialized',
+        message: 'Please ensure you have set up your Telegram credentials and run the login script first.',
+        details: error.message
+      });
+    }
+    
+    if (error.message.includes('not authorized')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Not authorized',
+        message: 'Please run the login script to authorize your account.',
+        details: error.message
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch pending join requests',
+      message: error.message,
+      details: error.stack
+    });
+  }
+});
+
+// Approve all pending join requests for a chat
+router.post('/chats/:chatId/approve-all', async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const results = await telegramService.approveAllPendingRequests(chatId);
+    
+    res.json({
+      success: true,
+      data: results
+    });
+  } catch (error) {
+    console.error('Error approving all pending requests:', error);
+    
+    if (error.message.includes('not initialized')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Telegram client not initialized',
+        message: 'Please ensure you have set up your Telegram credentials and run the login script first.',
+        details: error.message
+      });
+    }
+    
+    if (error.message.includes('not authorized')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Not authorized',
+        message: 'Please run the login script to authorize your account.',
+        details: error.message
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to approve all pending requests',
+      message: error.message,
+      details: error.stack
+    });
+  }
+});
+
 module.exports = router; 
