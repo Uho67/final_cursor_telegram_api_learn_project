@@ -5,6 +5,9 @@ const { healthCheck } = require('../controllers/healthController');
 // Health check route
 router.get('/health', healthCheck);
 
+// Telegram routes
+router.use('/telegram', require('./telegram'));
+
 // TODO: Add more routes here
 // Example:
 // router.use('/auth', require('./auth'));

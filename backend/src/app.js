@@ -3,6 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const { initializeDatabase } = require('./database');
+const telegramService = require('./services/telegramService');
+const logger = require('./utils/logger');
 
 const app = express();
 
@@ -23,14 +25,26 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Initialize database and start server
-initializeDatabase()
-  .then(() => {
+// Initialize database and Telegram service, then start server
+async function startServer() {
+  try {
+    // Initialize database
+    await initializeDatabase();
+    logger.info('Database initialized successfully');
+
+    // Initialize Telegram service
+    logger.info('Initializing Telegram service...');
+    await telegramService.initialize();
+    logger.info('Telegram service initialized successfully');
+
+    // Start server
     app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
+      logger.info(`Server is running on port ${PORT}`);
     });
-  })
-  .catch((error) => {
-    console.error('Failed to initialize database:', error);
+  } catch (error) {
+    logger.error('Failed to start server:', error);
     process.exit(1);
-  }); 
+  }
+}
+
+startServer(); 

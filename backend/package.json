@@ -16,7 +16,8 @@
     "cors": "^2.8.5",
     "helmet": "^7.1.0",
     "telegram": "^2.19.10",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "input": "^1.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",
